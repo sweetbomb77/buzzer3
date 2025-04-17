@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+  <title>buzzer 3</title>
+  <link rel="icon" href="./3bg.png" type="image/x-icon" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      background-color: white;
+      overflow: hidden;
+      height: 100vh;
+      text-align: center;
+    }
+
+    main {
+      z-index: 2;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      flex-grow: 1;
+    }
+
+    h1 {
+      font-size: 7vw;
+      margin-bottom: 2vh;
+    }
+
+    img {
+      width: 60vw;
+      max-width: 300px;
+      height: auto;
+    }
+
+    h2 {
+      font-size: 6vw;
+      margin-top: 2vh;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+    }
+
+    #popup {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.85);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 7vw;
+      text-align: center;
+      z-index: 10;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="popup">You have buzzer 3 💛<br>Tap anywhere to start</div>
+
+<main>
+  <h1>You have buzzer 💛</h1>
+  <img src="3bg.png" />
+  <h2 id="status">Status: preparing</h2>
+</main>
+
+<canvas id="snakeCanvas"></canvas>
+
+<script>
+  const statusEl = document.getElementById("status");
+  const STORAGE_KEY = "controller-three-state";
+  const beep = new Audio("beep.wav");
+  beep.loop = true;
+
+  let audioAllowed = false;
+  let snakeColor = 'red'; // Start with snake being red (off)
+
+  // Function to update the UI and audio
+  function updateUI(isOn) {
+    statusEl.textContent = `Status: ${isOn ? "ready" : "preparing"}`;
+    document.body.style.backgroundColor = isOn ? "lightgreen" : "white";
+    snakeColor = isOn ? 'green' : 'red'; // Change snake color based on state
+
+    if (isOn && audioAllowed) {
+      beep.currentTime = 0;
+      beep.play().catch(e => {
+        console.warn("Autoplay blocked", e);
+      });
+    } else {
+      beep.pause();
+      beep.currentTime = 0;
+    }
+  }
+
+  // Restore saved state from localStorage on load
+  const saved = localStorage.getItem(STORAGE_KEY);
+  const initialState = saved === "true";
+  updateUI(initialState);
+
+  // WebSocket setup
+  const socket = new WebSocket("wss://forthwall-webhook.onrender.com");
+
+  socket.addEventListener("open", () => {
+    console.log("Receiver connected to server");
+  });
+
+  socket.addEventListener("message", (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === "toggle" && data.state?.id === "controller-three") {
+        const isOn = data.state.value === true;
+        updateUI(isOn);
+        localStorage.setItem(STORAGE_KEY, isOn);
+      }
+    } catch (e) {
+      console.error("Error parsing message:", e);
+    }
+  });
+
+  socket.addEventListener("error", (err) => {
+    console.error("WebSocket error:", err);
+  });
+
+  // Audio unlock popup
+  document.getElementById("popup").addEventListener("click", () => {
+    audioAllowed = true;
+    document.getElementById("popup").style.display = "none";
+    updateUI(initialState); // Re-apply state with sound
+  });
+
+  // Snake animation around edge
+  const canvas = document.getElementById("snakeCanvas");
+  const ctx = canvas.getContext("2d");
+
+  let width = window.innerWidth;
+  let height = window.innerHeight;
+  canvas.width = width;
+  canvas.height = height;
+
+  const cellSize = 20;
+  const snake = [];
+  let x = 0, y = 0;
+  let dir = 'right';
+
+  // Adjust length to fit the canvas size without getting cut off
+  const snakeLength = Math.floor(Math.min(width, height) / cellSize) - 1;
+  
+  for (let i = 0; i < snakeLength; i++) {
+    snake.push({ x: 0, y: 0 });
+  }
+
+  function updateDirection() {
+    if (dir === 'right' && x + cellSize >= width) dir = 'down';
+    else if (dir === 'down' && y + cellSize >= height) dir = 'left';
+    else if (dir === 'left' && x <= 0) dir = 'up';
+    else if (dir === 'up' && y <= 0) dir = 'right';
+  }
+
+  function moveSnake() {
+    updateDirection();
+    if (dir === 'right') x += cellSize;
+    else if (dir === 'down') y += cellSize;
+    else if (dir === 'left') x -= cellSize;
+    else if (dir === 'up') y -= cellSize;
+
+    snake.push({ x, y });
+    while (snake.length > snakeLength) {
+      snake.shift();
+    }
+  }
+
+  function drawSnake() {
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = snakeColor;  // Use snakeColor based on the state
+    ctx.strokeStyle = "darkgreen"; // Darker color for the snake outline
+    ctx.lineWidth = 2;
+
+    snake.forEach(segment => {
+      ctx.beginPath();
+      ctx.arc(segment.x + cellSize / 2, segment.y + cellSize / 2, cellSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+  }
+
+  function loop() {
+    moveSnake();
+    drawSnake();
+    setTimeout(() => requestAnimationFrame(loop), 100);  // Slow down by adding a delay
+  }
+
+  window.addEventListener('resize', () => {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+
+    // Recalculate snake length based on new dimensions
+    const newSnakeLength = Math.floor(Math.min(width, height) / cellSize) - 1;
+    snake.length = newSnakeLength; // Resize the snake array
+  });
+
+  // Function to generate random color
+  function getRandomColor() {
+    const letters = '0123456789ABCDEF';
+    let color = '#';
+    for (let i = 0; i < 6; i++) {
+      color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+  }
+
+  // Track taps and change background color after 3 taps in 3 seconds
+  let tapCount = 0;
+  let lastTapTime = 0;
+
+  document.body.addEventListener('click', () => {
+    const currentTime = Date.now();
+    if (currentTime - lastTapTime < 3000) {
+      tapCount++;
+      if (tapCount >= 3) {
+        if (document.getElementById("popup").style.display === "none") {
+          document.body.style.backgroundColor = getRandomColor();
+        }
+      }
+    } else {
+      tapCount = 1; // Reset tap count if the 3-second window has passed
+    }
+    lastTapTime = currentTime;
+  });
+
+  loop();
+</script>
+</body>
+</html>
